@@ -12,17 +12,23 @@
 #include <linux/icmp.h>
 #include <linux/inet.h>
 #include <net/sock.h>
+#include <linux/ktime.h>
+
 
 static struct nf_hook_ops nfho;
 static struct socket *clientsocket=NULL;
 static unsigned long bloked_port;
+
+static    ktime_t kt;
 static unsigned int hook_func(void* priv, struct sk_buff *skb, const struct nf_hook_state* state)
 {
     struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
-    
     struct icmphdr *icmp_header;
-    unsigned int type, code;
-    int source_ip=ip_header->saddr;
+    unsigned int type, code,source_ip;
+    struct timespec64 ts;
+    ktime_get_real_ts64(&ts);
+    kt=ktime_set(ts.tv_sec,ts.tv_nsec)-kt;
+     source_ip=ip_header->saddr;
     if (ip_header->protocol == 1) //ICMP protocol
     {
         icmp_header= (struct icmphdr *)((__u32 *)ip_header+ ip_header->ihl);
@@ -34,7 +40,8 @@ static unsigned int hook_func(void* priv, struct sk_buff *skb, const struct nf_h
 //	cur_time=var->base->get_time();      // текущее время в типе ktime_t
         if(type==ICMP_ECHOREPLY && code==0)
         {
-            printk("IP Source: %i ping \n",source_ip);
+            printk("IP Source: %i ping at %lli mks \n",source_ip,kt/1000);
+            //printk("IP Source: %i ping at %lds %lins \n",source_ip,ts.tv_sec,ts.tv_nsec);
 	    return NF_DROP;
         }
     }
@@ -46,8 +53,11 @@ static ssize_t f_proc_write(struct file *file, const char __user *ubuf,
 				  size_t len, loff_t *offp)
 {
 	char tmpbuf[80];
+    struct timespec64 ts;
+    ktime_get_real_ts64(&ts);
+    kt=ktime_set(ts.tv_sec,ts.tv_nsec);
 	char buf[64];
-	int sock;
+	int i=0;
 	struct msghdr msg;
 	struct sockaddr_in to;
 	struct iovec iov;
@@ -59,7 +69,6 @@ static ssize_t f_proc_write(struct file *file, const char __user *ubuf,
 	  memset(&iov_it,0,sizeof(iov_it));
 	if (len == 0)
 		return 0;
-	int i=0;
         for ( i = 0; i < len; i++)
            get_user(tmpbuf[i],ubuf + i);
 
@@ -93,10 +102,11 @@ static ssize_t f_proc_write(struct file *file, const char __user *ubuf,
 	 old_fs = get_fs();
 	 set_fs(KERNEL_DS);
         #endif
-	    len = sock_sendmsg(clientsocket, &msg);//?
+	    len = sock_sendmsg(clientsocket, &msg);
         #ifndef KSOCKET_ADDR_SAFE
 	 set_fs(old_fs);
         #endif
+            //printk("IP ping: %s ping at %lld \n",tmpbuf,kt);
 //	 printk("Заблокирован TCP порт %li\n",bloked_port);
 
        return i;
